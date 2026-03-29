@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -18,7 +19,9 @@
             --danger: #ff4d6d;
         }
 
-        * { box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+        }
 
         body {
             margin: 0;
@@ -105,9 +108,20 @@
             touch-action: manipulation;
         }
 
-        button:hover { background: rgba(255, 255, 255, 0.10); border-color: rgba(255, 255, 255, 0.18); }
-        button:active { transform: translateY(1px); }
-        button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+        button:hover {
+            background: rgba(255, 255, 255, 0.10);
+            border-color: rgba(255, 255, 255, 0.18);
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            transform: none;
+        }
 
         #startBtn {
             background: linear-gradient(135deg, rgba(124, 92, 255, 0.95), rgba(39, 209, 179, 0.80));
@@ -132,7 +146,9 @@
         }
 
         @media (max-width: 860px) {
-            .grid { grid-template-columns: 1fr; }
+            .grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         .card {
@@ -169,7 +185,7 @@
             overflow-y: auto;
         }
 
-        #messages > div {
+        #messages>div {
             padding: 8px 10px;
             border: 1px solid rgba(255, 255, 255, 0.08);
             background: rgba(0, 0, 0, 0.16);
@@ -198,8 +214,14 @@
             min-width: 0;
         }
 
-        #messageInput::placeholder { color: rgba(255, 255, 255, 0.35); }
-        #messageInput:focus { border-color: rgba(124, 92, 255, 0.55); box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.18); }
+        #messageInput::placeholder {
+            color: rgba(255, 255, 255, 0.35);
+        }
+
+        #messageInput:focus {
+            border-color: rgba(124, 92, 255, 0.55);
+            box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.18);
+        }
 
         audio {
             width: 100%;
@@ -249,8 +271,21 @@
                 width: 100%;
             }
         }
+
+        #localVideo,
+        #remoteVideo {
+            width: 320px;
+            height: 240px;
+            border: 1px solid #ccc;
+            margin: 10px;
+        }
+
+        #localVideo {
+            transform: scaleX(-1);
+        }
     </style>
 </head>
+
 <body>
     <div class="app">
         <div class="topbar">
@@ -265,6 +300,7 @@
             <button id="startBtn" onclick="startApp()">加入频道</button>
             <button id="leaveBtn" onclick="leaveApp()" disabled>离开频道</button>
             <button id="pttBtn" disabled>按住说话</button>
+            <button id="videoBtn" onclick="openVideo()" disabled>打开视频</button>
         </div>
 
         <div class="grid">
@@ -279,17 +315,28 @@
                     <button onclick="sendMessage()">发送</button>
                 </div>
             </div>
+            <div>
+                <div class="card">
+                    <div class="cardHeader">
+                        <div class="cardHeaderTitle">视频</div>
+                    </div>
+                    <video id="localVideo" autoplay playsinline controls></video>
 
-            <div class="card">
-                <div class="cardHeader">
-                    <div class="cardHeaderTitle">音频</div>
-                    <div class="cardHeaderHint">建议佩戴耳机</div>
+                    <video id="remoteVideo" autoplay playsinline controls></video>
                 </div>
-                <audio id="remoteAudio" autoplay playsinline controls></audio>
+                <div class="card">
+                    <div class="cardHeader">
+                        <div class="cardHeaderTitle">音频</div>
+                        <div class="cardHeaderHint">建议佩戴耳机</div>
+                    </div>
+                    <audio id="remoteAudio" autoplay playsinline controls></audio>
+                </div>
             </div>
+
         </div>
 
         <script src="/static/main.js"></script>
     </div>
 </body>
+
 </html>

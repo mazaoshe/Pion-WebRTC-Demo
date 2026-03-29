@@ -8,7 +8,12 @@ let remoteAudio = document.getElementById('remoteAudio');
 let statusDiv = document.getElementById('status');
 let pttBtn = document.getElementById('pttBtn');
 
-function setMicEnabled(enabled) {
+
+let localVideo = document.getElementById('localVideo');
+let remoteVideo = document.getElementById('remoteVideo');
+let videoEnabled = false;
+
+function setMicEnabled (enabled) {
     if (!localStream) {
         return;
     }
@@ -19,9 +24,10 @@ function setMicEnabled(enabled) {
 }
 
 // 统一的入口函数
-async function startApp() {
+async function startApp () {
     document.getElementById('startBtn').disabled = true;
     document.getElementById('leaveBtn').disabled = false;
+    document.getElementById('videoBtn').disabled = false;
     pttBtn.disabled = true;
     statusDiv.textContent = "状态: 正在请求麦克风权限...";
 
@@ -56,10 +62,16 @@ async function startApp() {
         // 4. 监听远程发来的媒体轨道 (其他人的声音)
         pc.ontrack = event => {
             console.log("收到远程媒体轨道");
-            // 将收到的流赋值给 audio 标签播放
-            if (remoteAudio.srcObject !== event.streams[0]) {
-                remoteAudio.srcObject = event.streams[0];
-                statusDiv.textContent = "状态: 已连接并收到音频流";
+            if (event.track.kind === 'audio') {
+                if (remoteAudio.srcObject !== event.streams[0]) {
+                    remoteAudio.srcObject = event.streams[0];
+                    statusDiv.textContent = "状态: 已连接并收到音频流";
+                }
+            } else if (event.track.kind === 'video') {
+                if (remoteVideo.srcObject !== event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                    statusDiv.textContent = "状态：已连接并收到音视频流";
+                }
             }
         };
 
@@ -85,7 +97,7 @@ async function startApp() {
         let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         ws = new WebSocket(wsProtocol + "//" + window.location.host + "/ws");
 
-        ws.onopen = function() {
+        ws.onopen = function () {
             console.log("WebSocket 连接已建立，正在发起 Offer...");
             pc.createOffer().then(offer => {
                 pc.setLocalDescription(offer);
@@ -93,7 +105,7 @@ async function startApp() {
             });
         };
 
-        ws.onmessage = function(event) {
+        ws.onmessage = function (event) {
             let msg = JSON.parse(event.data);
             if (msg.sdp) {
                 pc.setRemoteDescription(new RTCSessionDescription(msg));
@@ -119,7 +131,7 @@ async function startApp() {
 }
 
 // 离开频道的函数
-function leaveApp() {
+function leaveApp () {
     console.log("正在离开频道...");
 
     setMicEnabled(false);
@@ -133,7 +145,9 @@ function leaveApp() {
     }
 
     // 2. 停止播放远程音频
-    remoteAudio.srcObject = null;
+    if (remoteAudio) remoteAudio.srcObject = null;
+    if (remoteVideo) remoteVideo.srcObject = null;
+    if (localVideo) localVideo.srcObject = null;
 
     // 3. 关闭数据通道
     if (dc) {
@@ -159,14 +173,15 @@ function leaveApp() {
     statusDiv.textContent = "状态: 已离开频道";
     document.getElementById('startBtn').disabled = false;
     document.getElementById('leaveBtn').disabled = true;
+    document.getElementById('videoBtn').disabled = true;
     pttBtn.disabled = true;
-    
+
     // 可以选择清空聊天记录
     // messages.innerHTML = ''; 
 }
 
 // 发送文本消息保持不变
-function sendMessage() {
+function sendMessage () {
     let input = document.getElementById("messageInput");
     if (dc && dc.readyState === "open") {
         let message = document.createElement('div');
@@ -177,5 +192,53 @@ function sendMessage() {
         input.value = "";
     } else {
         console.warn("数据通道尚未就绪，请稍等...");
+    }
+}
+
+async function openVideo () {
+    document.getElementById('videoBtn').disabled = true;
+    if (!localStream || videoEnabled) {
+        return;
+    }
+
+    try {
+        statusDiv.textContent = "状态：正在请求摄像头权限...";
+
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: "user"
+            },
+            audio: false // 不重复获取音频
+        });
+
+        videoStream.getVideoTracks().forEach(track => {
+            localStream.addTrack(track);
+            pc.addTrack(track, localStream);
+        });
+
+        if (localVideo) {
+            localVideo.srcObject = localStream;
+        }
+
+        videoEnabled = true;
+        statusDiv.textContent = "状态：视频已开启";
+        document.getElementById('videoBtn').disabled = true;
+        document.getElementById('videoBtn').textContent = "视频已开启";
+
+        if (pc && ws && ws.readyState === WebSocket.OPEN) {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify(offer));
+            console.log("视频轨道已添加，重新发送 Offer");
+        }
+
+    } catch (err) {
+        console.error("无法获取摄像头权限或初始化失败:", err);
+        statusDiv.textContent = "状态: 错误 - " + err.message;
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('leaveBtn').disabled = true;
+        pttBtn.disabled = true;
     }
 }

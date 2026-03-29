@@ -94,7 +94,7 @@ func main() {
 		localID := fmt.Sprintf("peer-%d", channelID)
 		mutex.Unlock()
 
-		// --- 音频处理核心逻辑 (SFU) ---
+		// --- 音视频处理核心逻辑 (SFU) ---
 
 		// 1. 创建一个用于向此客户端发送音频的本地轨道 (Downlink)
 		// 我们假设使用 Opus 编码
@@ -121,34 +121,78 @@ func main() {
 			}
 		}()
 
+		outputVideoTrack, err := webrtc.NewTrackLocalStaticRTP(
+			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+			"video",
+			"pion",
+		)
+		if err != nil {
+			log.Print("创建本地视频轨道失败: ", err)
+			return
+		}
+
+		// 将视频轨道添加到 PeerConnection
+		videoSender, err := peerConnection.AddTrack(outputVideoTrack)
+		if err != nil {
+			log.Print("AddTrack video failed: ", err)
+			return
+		}
+		// 读取视频 RTCP 包（新增）
+		go func() {
+			rtcpBuf := make([]byte, 1500)
+			for {
+				if _, _, rtcpErr := videoSender.Read(rtcpBuf); rtcpErr != nil {
+					return
+				}
+			}
+		}()
+
 		// 将此下行轨道注册到全局 Map 中
 		mutex.Lock()
 		audioTracks[localID] = outputTrack
+		videoTracks[localID] = outputVideoTrack
 		mutex.Unlock()
 
 		// 2. 监听来自此客户端的音频流 (Uplink)
 		peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			log.Printf("收到来自 '%s' 的音频轨道: %s \n", localID, track.Codec().MimeType)
 
-			// 循环读取 RTP 音频包
-			for {
-				rtpPacket, _, readErr := track.ReadRTP()
-				if readErr != nil {
-					log.Printf("读取 RTP 包失败或连接断开: %v", readErr)
-					return
-				}
+			if track.Kind() == webrtc.RTPCodecTypeAudio {
 
-				// 将收到的音频包广播给其他所有客户端的下行轨道
-				mutex.Lock()
-				for id, outTrack := range audioTracks {
-					// 不发给自己，防止回音
-					if id != localID {
-						if writeErr := outTrack.WriteRTP(rtpPacket); writeErr != nil {
-							// 忽略由于通道刚刚关闭导致的写入错误
+				// 循环读取 RTP 音频包
+				for {
+					rtpPacket, _, readErr := track.ReadRTP()
+					if readErr != nil {
+						log.Printf("读取 RTP 包失败或连接断开: %v", readErr)
+						return
+					}
+
+					// 将收到的音频包广播给其他所有客户端的下行轨道
+					mutex.Lock()
+					for id, outTrack := range audioTracks {
+						// 不发给自己，防止回音
+						if id != localID {
+							if writeErr := outTrack.WriteRTP(rtpPacket); writeErr != nil {
+								// 忽略由于通道刚刚关闭导致的写入错误
+							}
 						}
 					}
+					mutex.Unlock()
 				}
-				mutex.Unlock()
+			} else if track.Kind() == webrtc.RTPCodecTypeVideo {
+				for {
+					rtpPacket, _, readErr := track.ReadRTP()
+					if readErr != nil {
+						return
+					}
+					mutex.Lock()
+					for id, outTrack := range videoTracks {
+						if id != localID {
+							outTrack.WriteRTP(rtpPacket)
+						}
+					}
+					mutex.Unlock()
+				}
 			}
 		})
 
@@ -188,6 +232,7 @@ func main() {
 				log.Printf("PeerConnection 状态变更为 %s, 清理资源: %s\n", s.String(), localID)
 				mutex.Lock()
 				delete(audioTracks, localID)
+				delete(videoTracks, localID)
 				delete(dataChannels, localID)
 				mutex.Unlock()
 			}
