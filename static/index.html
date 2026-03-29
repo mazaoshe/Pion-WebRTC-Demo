@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pion-webrtc-demo (对讲机版)</title>
+    <style>
+        :root {
+            --bg: #0b1020;
+            --panel: rgba(255, 255, 255, 0.06);
+            --panel-strong: rgba(255, 255, 255, 0.10);
+            --text: rgba(255, 255, 255, 0.92);
+            --muted: rgba(255, 255, 255, 0.65);
+            --border: rgba(255, 255, 255, 0.10);
+            --shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+            --accent: #7c5cff;
+            --accent-2: #27d1b3;
+            --danger: #ff4d6d;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            color: var(--text);
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+            -webkit-text-size-adjust: 100%;
+            background:
+                radial-gradient(1200px 900px at 20% 10%, rgba(124, 92, 255, 0.30), transparent 60%),
+                radial-gradient(900px 700px at 85% 30%, rgba(39, 209, 179, 0.22), transparent 55%),
+                radial-gradient(900px 700px at 30% 85%, rgba(255, 77, 109, 0.12), transparent 60%),
+                var(--bg);
+        }
+
+        .app {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 28px 18px 40px;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .title {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .title h1 {
+            font-size: 18px;
+            margin: 0;
+            letter-spacing: 0.2px;
+            font-weight: 650;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        #status {
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            background: var(--panel);
+            border-radius: 999px;
+            font-size: 13px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: linear-gradient(180deg, var(--panel), rgba(255, 255, 255, 0.03));
+            box-shadow: var(--shadow);
+            margin-bottom: 16px;
+        }
+
+        button {
+            appearance: none;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            padding: 10px 12px;
+            border-radius: 12px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+            min-height: 44px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 120ms ease, background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        button:hover { background: rgba(255, 255, 255, 0.10); border-color: rgba(255, 255, 255, 0.18); }
+        button:active { transform: translateY(1px); }
+        button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+        #startBtn {
+            background: linear-gradient(135deg, rgba(124, 92, 255, 0.95), rgba(39, 209, 179, 0.80));
+            border-color: rgba(255, 255, 255, 0.16);
+        }
+
+        #leaveBtn {
+            background: rgba(255, 77, 109, 0.12);
+            border-color: rgba(255, 77, 109, 0.30);
+        }
+
+        #pttBtn {
+            background: rgba(255, 255, 255, 0.10);
+            border-color: rgba(255, 255, 255, 0.18);
+            touch-action: none;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.25fr 0.75fr;
+            gap: 14px;
+        }
+
+        @media (max-width: 860px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+
+        .card {
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: linear-gradient(180deg, var(--panel), rgba(255, 255, 255, 0.03));
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .cardHeader {
+            padding: 12px 12px 10px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .cardHeaderTitle {
+            font-weight: 650;
+            letter-spacing: 0.2px;
+            font-size: 14px;
+        }
+
+        .cardHeaderHint {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        #messages {
+            height: min(45vh, 420px);
+            padding: 12px;
+            overflow-y: auto;
+        }
+
+        #messages > div {
+            padding: 8px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.16);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+
+        .composer {
+            display: flex;
+            gap: 10px;
+            padding: 12px;
+            border-top: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        #messageInput {
+            flex: 1;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.25);
+            color: var(--text);
+            padding: 10px 12px;
+            font-size: 16px;
+            outline: none;
+            min-width: 0;
+        }
+
+        #messageInput::placeholder { color: rgba(255, 255, 255, 0.35); }
+        #messageInput:focus { border-color: rgba(124, 92, 255, 0.55); box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.18); }
+
+        audio {
+            width: 100%;
+            display: block;
+            padding: 12px;
+        }
+
+        @media (max-width: 520px) {
+            .app {
+                padding: 18px 14px 28px;
+            }
+
+            .topbar {
+                align-items: flex-start;
+                gap: 10px;
+            }
+
+            #status {
+                max-width: 46vw;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .controls {
+                position: sticky;
+                bottom: 0;
+                z-index: 20;
+                padding-bottom: calc(12px + env(safe-area-inset-bottom));
+                backdrop-filter: blur(10px);
+                background: rgba(11, 16, 32, 0.70);
+                border-color: rgba(255, 255, 255, 0.14);
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+            }
+
+            #pttBtn {
+                grid-column: 1 / -1;
+                min-height: 56px;
+                font-size: 18px;
+            }
+
+            .composer {
+                flex-direction: column;
+            }
+
+            .composer button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <div class="topbar">
+            <div class="title">
+                <h1>对讲机频道</h1>
+                <div class="subtitle">局域网低延迟语音 + 文本辅助</div>
+            </div>
+            <div id="status">状态: 未连接</div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" onclick="startApp()">加入频道</button>
+            <button id="leaveBtn" onclick="leaveApp()" disabled>离开频道</button>
+            <button id="pttBtn" disabled>按住说话</button>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="cardHeader">
+                    <div class="cardHeaderTitle">文本消息</div>
+                    <div class="cardHeaderHint">用于提示/指令/测试</div>
+                </div>
+                <div id="messages"></div>
+                <div class="composer">
+                    <input type="text" id="messageInput" placeholder="输入一条消息…" />
+                    <button onclick="sendMessage()">发送</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="cardHeader">
+                    <div class="cardHeaderTitle">音频</div>
+                    <div class="cardHeaderHint">建议佩戴耳机</div>
+                </div>
+                <audio id="remoteAudio" autoplay playsinline controls></audio>
+            </div>
+        </div>
+
+        <script src="/static/main.js"></script>
+    </div>
+</body>
+</html>

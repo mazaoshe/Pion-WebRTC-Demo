@@ -1,0 +1,35 @@
+version: '3.7'
+
+services:
+  pion-webrtc:
+    image: pion-webrtc-demo:latest
+    platform: linux/amd64
+    container_name: pion-webrtc
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - traefik-net
+    environment:
+      - PORT=8080
+      - STUN_URLS=stun:stun.l.google.com:19302
+      - UDP_MIN=50000
+      - UDP_MAX=50020
+    ports:
+      - "50000-50020:50000-50020/udp"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+      - "traefik.http.routers.pion-webrtc.entrypoints=websecure"
+      - "traefik.http.routers.pion-webrtc.rule=Host(`pion.ypplog.cn`)"
+      - "traefik.http.routers.pion-webrtc.tls=true"
+      - "traefik.http.services.pion-webrtc.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.pion-webrtc-compress.compress=true"
+      - "traefik.http.routers.pion-webrtc.middlewares=pion-webrtc-compress"
+
+networks:
+  traefik-net:
+    external: true
