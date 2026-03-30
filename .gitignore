@@ -1,0 +1,3 @@
+# Ignore server binaries
+server-amd64
+server

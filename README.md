@@ -54,7 +54,7 @@ go mod tidy
 直接运行主程序：
 
 ```bash
-go run main.go
+USE_TLS=true TLS_CERT_FILE=cert.pem TLS_KEY_FILE=key.pem go run main.go
 ```
 
 或者使用 Docker：
@@ -63,7 +63,13 @@ go run main.go
 docker-compose up
 ```
 
-### 4. 访问应用
+### 4. 构建项目
+
+```bash
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o server 
+```
+
+### 5. 访问应用
 
 打开浏览器，访问 [http://localhost:8080](http://localhost:8080)。
 
