@@ -280,7 +280,8 @@
             margin: 10px;
         }
 
-        #localVideo {
+        #localVideo,
+        #remoteVideo {
             transform: scaleX(-1);
         }
     </style>
@@ -293,10 +294,25 @@
                 <h1>对讲机频道</h1>
                 <div class="subtitle">局域网低延迟语音 + 文本辅助</div>
             </div>
-            <div id="status">状态: 未连接</div>
+            <div>
+                <div id="status">状态: 未连接</div>
+                <div id="statsPanel"
+                    style="margin: 10px 0; padding: 10px; background: var(--panel); border-radius: 12px; display: flex; justify-content: space-around; font-size: 14px;">
+                    <div>📤 上行：<span id="statsUp">0 MB</span></div>
+                    <div>📥 下行：<span id="statsDown">0 MB</span></div>
+                    <div>📊 总计：<span id="statsTotal">0 MB</span></div>
+                </div>
+            </div>
+
         </div>
 
         <div class="controls">
+            <input type="text" id="channelInput" placeholder="频道名称" style="flex:1; min-width:100px; padding:10px 12px; border-radius:12px; 
+                  border:1px solid var(--border); background:rgba(0,0,0,0.25); 
+                  color:var(--text); font-size:14px; outline:none;">
+            <input type="text" id="nameInput" placeholder="昵称" style="flex:1; min-width:100px; padding:10px 12px; border-radius:12px; 
+                  border:1px solid var(--border); background:rgba(0,0,0,0.25); 
+                  color:var(--text); font-size:14px; outline:none;">
             <button id="startBtn" onclick="startApp()">加入频道</button>
             <button id="leaveBtn" onclick="leaveApp()" disabled>离开频道</button>
             <button id="pttBtn" disabled>按住说话</button>
@@ -320,9 +336,9 @@
                     <div class="cardHeader">
                         <div class="cardHeaderTitle">视频</div>
                     </div>
-                    <video id="localVideo" autoplay playsinline controls></video>
+                    <video id="localVideo" autoplay playsinline controls muted></video>
 
-                    <video id="remoteVideo" autoplay playsinline controls></video>
+                    <video id="remoteVideo" autoplay playsinline controls muted></video>
                 </div>
                 <div class="card">
                     <div class="cardHeader">

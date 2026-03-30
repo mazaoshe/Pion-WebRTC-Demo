@@ -11,8 +11,14 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
+
+type VideoSenderInfo struct {
+	pc   *webrtc.PeerConnection
+	ssrc webrtc.SSRC
+}
 
 var (
 	// upgrader 用于将 HTTP 连接升级为 WebSocket 连接
@@ -32,11 +38,19 @@ var (
 	// videoTracks 存储所有活跃的下行视频轨道
 	videoTracks = make(map[string]*webrtc.TrackLocalStaticRTP)
 
+	videoSenders = make(map[string]*VideoSenderInfo)
+
 	// mutex 互斥锁，保证对 map 的并发访问安全
 	mutex = &sync.Mutex{}
 
 	// channelID 用于生成唯一的 peer 标识符
 	channelID = 0
+
+	// 预设的视频比特率 (可根据需要调整)
+	VideoBitrate = 500 * 1000 // 500 kbps
+
+	// 每个 peer 属于哪个频道
+	peerChannels = make(map[string]string)
 )
 
 func main() {
@@ -46,6 +60,10 @@ func main() {
 
 	// 处理 WebSocket 请求
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+		if channel == "" {
+			channel = "默认频道"
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Print("upgrade failed: ", err)
@@ -92,6 +110,7 @@ func main() {
 		mutex.Lock()
 		channelID++
 		localID := fmt.Sprintf("peer-%d", channelID)
+		peerChannels[localID] = channel
 		mutex.Unlock()
 
 		// --- 音视频处理核心逻辑 (SFU) ---
@@ -122,7 +141,7 @@ func main() {
 		}()
 
 		outputVideoTrack, err := webrtc.NewTrackLocalStaticRTP(
-			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000, SDPFmtpLine: fmt.Sprintf("x-google-start-bitrate=%d;x-google-max-bitrate=%d", VideoBitrate/1000, VideoBitrate/1000)},
 			"video",
 			"pion",
 		)
@@ -139,10 +158,39 @@ func main() {
 		}
 		// 读取视频 RTCP 包（新增）
 		go func() {
-			rtcpBuf := make([]byte, 1500)
 			for {
-				if _, _, rtcpErr := videoSender.Read(rtcpBuf); rtcpErr != nil {
+				pkts, _, rtcpErr := videoSender.ReadRTCP()
+				if rtcpErr != nil {
 					return
+				}
+				for _, pkt := range pkts {
+					switch p := pkt.(type) {
+					case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
+						mutex.Lock()
+						for id, info := range videoSenders {
+							if id != localID && sameChannel(id, localID) {
+								info.pc.WriteRTCP([]rtcp.Packet{
+									&rtcp.PictureLossIndication{
+										MediaSSRC: uint32(info.ssrc),
+									},
+								})
+							}
+						}
+						mutex.Unlock()
+					case *rtcp.ReceiverEstimatedMaximumBitrate:
+						mutex.Lock()
+						for id, info := range videoSenders {
+							if id != localID && sameChannel(id, localID) {
+								info.pc.WriteRTCP([]rtcp.Packet{
+									&rtcp.ReceiverEstimatedMaximumBitrate{
+										Bitrate: p.Bitrate,
+										SSRCs:   []uint32{uint32(info.ssrc)},
+									},
+								})
+							}
+						}
+						mutex.Unlock()
+					}
 				}
 			}
 		}()
@@ -171,7 +219,7 @@ func main() {
 					mutex.Lock()
 					for id, outTrack := range audioTracks {
 						// 不发给自己，防止回音
-						if id != localID {
+						if id != localID && sameChannel(id, localID) {
 							if writeErr := outTrack.WriteRTP(rtpPacket); writeErr != nil {
 								// 忽略由于通道刚刚关闭导致的写入错误
 							}
@@ -180,6 +228,28 @@ func main() {
 					mutex.Unlock()
 				}
 			} else if track.Kind() == webrtc.RTPCodecTypeVideo {
+
+				mutex.Lock()
+				videoSenders[localID] = &VideoSenderInfo{
+					pc:   peerConnection,
+					ssrc: track.SSRC(),
+				}
+				mutex.Unlock()
+
+				go func() {
+					mutex.Lock()
+					for id, info := range videoSenders {
+						if id != localID && sameChannel(id, localID) {
+							info.pc.WriteRTCP([]rtcp.Packet{
+								&rtcp.PictureLossIndication{
+									MediaSSRC: uint32(info.ssrc),
+								},
+							})
+						}
+					}
+					mutex.Unlock()
+				}()
+
 				for {
 					rtpPacket, _, readErr := track.ReadRTP()
 					if readErr != nil {
@@ -187,7 +257,7 @@ func main() {
 					}
 					mutex.Lock()
 					for id, outTrack := range videoTracks {
-						if id != localID {
+						if id != localID && sameChannel(id, localID) {
 							outTrack.WriteRTP(rtpPacket)
 						}
 					}
@@ -196,7 +266,7 @@ func main() {
 			}
 		})
 
-		// --- 数据通道处理 (保持不变) ---
+		// --- 数据通道处理 ---
 		peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
 			log.Printf("收到新的数据通道: %s %d\n", d.Label(), d.ID())
 
@@ -211,7 +281,7 @@ func main() {
 				mutex.Lock()
 				defer mutex.Unlock()
 				for id, dc := range dataChannels {
-					if id != localID {
+					if id != localID && sameChannel(id, localID) {
 						if err := dc.SendText(string(msg.Data)); err != nil {
 						}
 					}
@@ -234,6 +304,8 @@ func main() {
 				delete(audioTracks, localID)
 				delete(videoTracks, localID)
 				delete(dataChannels, localID)
+				delete(videoSenders, localID)
+				delete(peerChannels, localID)
 				mutex.Unlock()
 			}
 		})
@@ -364,7 +436,7 @@ func main() {
 func parseICEURLs(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return []string{"stun:stun.l.google.com:19302"}
+		return []string{"stun:stun-test.meilebei.com:3478"}
 	}
 
 	parts := strings.Split(raw, ",")
@@ -378,7 +450,7 @@ func parseICEURLs(raw string) []string {
 	}
 
 	if len(urls) == 0 {
-		return []string{"stun:stun.l.google.com:19302"}
+		return []string{"stun:stun-test.meilebei.com:3478"}
 	}
 
 	return urls
@@ -406,4 +478,9 @@ func parseUDPRange(minRaw, maxRaw string) (uint16, uint16, bool) {
 		return 0, 0, false
 	}
 	return uint16(minInt), uint16(maxInt), true
+}
+
+// 判断两个用户是否同组
+func sameChannel(a, b string) bool {
+	return peerChannels[a] == peerChannels[b]
 }

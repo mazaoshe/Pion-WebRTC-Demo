@@ -12,6 +12,13 @@ let pttBtn = document.getElementById('pttBtn');
 let localVideo = document.getElementById('localVideo');
 let remoteVideo = document.getElementById('remoteVideo');
 let videoEnabled = false;
+const VideoBitrate = 500; // 500 kbps
+
+let statsInterval = null;
+let totalBytesSent = 0;
+let totalBytesReceived = 0;
+let nickname = '用户';
+let channel = 'test';
 
 function setMicEnabled (enabled) {
     if (!localStream) {
@@ -25,9 +32,39 @@ function setMicEnabled (enabled) {
 
 // 统一的入口函数
 async function startApp () {
+
+    var channelInput = document.getElementById('channelInput');
+    var nicknameInput = document.getElementById('nameInput');
+
+    // 新增：元素存在性检查
+    if (!channelInput || !nicknameInput) {
+        console.error('输入框元素未找到，请检查 HTML');
+        statusDiv.textContent = "状态：错误 - 页面元素加载失败";
+        return;
+    }
+
+    // 新增：安全获取值（防止 null.value 报错）
+    channel = channelInput.value ? channelInput.value.trim() : '';
+    nickname = nicknameInput.value ? nicknameInput.value.trim() : '';
+
+    if (!channel) {
+        alert("请输入频道名");
+        channelInput.focus();
+        return;
+    }
+    if (!nickname) {
+        alert("请输入昵称");
+        nickname.focus();
+        return;
+    }
+
     document.getElementById('startBtn').disabled = true;
     document.getElementById('leaveBtn').disabled = false;
     document.getElementById('videoBtn').disabled = false;
+
+    document.getElementById('nameInput').disabled = true;
+    document.getElementById('channelInput').disabled = true;
+
     pttBtn.disabled = true;
     statusDiv.textContent = "状态: 正在请求麦克风权限...";
 
@@ -46,7 +83,7 @@ async function startApp () {
         // 2. 初始化 WebRTC
         pc = new RTCPeerConnection({
             iceServers: [
-                { urls: ["stun:stun.l.google.com:19302"] }
+                { urls: ["stun:stun-test.meilebei.com:3478"] }
             ]
         });
 
@@ -55,6 +92,8 @@ async function startApp () {
             pc.addTrack(track, localStream);
             console.log("本地音频轨道已添加");
         });
+
+        forceVP8Codec();
 
         // 对讲机模式：默认静音，按住按钮才说话（避免自回声/啸叫）
         setMicEnabled(false);
@@ -79,8 +118,9 @@ async function startApp () {
         dc = pc.createDataChannel("chat");
         dc.onopen = () => console.log("数据通道已成功建立！");
         dc.onmessage = event => {
+            const data = JSON.parse(event.data);
             let message = document.createElement('div');
-            message.textContent = '收到: ' + event.data;
+            message.textContent = `${data.nick}: ${data.text}`;
             messages.appendChild(message);
             messages.scrollTop = messages.scrollHeight;
         };
@@ -95,13 +135,26 @@ async function startApp () {
         // 7. 初始化 WebSocket 信令
         // 根据当前页面的协议动态决定使用 ws:// 还是 wss://
         let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        ws = new WebSocket(wsProtocol + "//" + window.location.host + "/ws");
+        const encodedChannel = encodeURIComponent(channel);
+        console.log(`正在连接 WebSocket 信令服务器，频道: ${channel}`);
+        ws = new WebSocket(wsProtocol + "//" + window.location.host + "/ws?channel=" + encodedChannel);
 
         ws.onopen = function () {
             console.log("WebSocket 连接已建立，正在发起 Offer...");
+            statsInterval = setInterval(updateStats, 2000);
             pc.createOffer().then(offer => {
-                pc.setLocalDescription(offer);
-                ws.send(JSON.stringify(offer));
+                // 设置 SDP 带宽限制
+                const modifiedSdp = limitVideoBandwidthInSdp(offer.sdp, VideoBitrate);
+
+                console.log(modifiedSdp);
+                pc.setLocalDescription({
+                    type: offer.type,
+                    sdp: modifiedSdp
+                });
+                ws.send(JSON.stringify({
+                    type: offer.type,
+                    sdp: modifiedSdp
+                }));
             });
         };
 
@@ -128,6 +181,12 @@ async function startApp () {
         document.getElementById('leaveBtn').disabled = true;
         pttBtn.disabled = true;
     }
+
+    pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+            enforceBitrate();
+        }
+    };
 }
 
 // 离开频道的函数
@@ -176,6 +235,22 @@ function leaveApp () {
     document.getElementById('videoBtn').disabled = true;
     pttBtn.disabled = true;
 
+    // 停止统计
+    if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+    }
+
+    // 重置显示
+    document.getElementById('statsUp').textContent = '0 MB';
+    document.getElementById('statsDown').textContent = '0 MB';
+    document.getElementById('statsTotal').textContent = '0 MB';
+
+    videoEnabled = false;
+
+    document.getElementById('nameInput').disabled = false;
+    document.getElementById('channelInput').disabled = false;
+
     // 可以选择清空聊天记录
     // messages.innerHTML = ''; 
 }
@@ -188,7 +263,7 @@ function sendMessage () {
         message.textContent = '发送: ' + input.value;
         messages.appendChild(message);
         messages.scrollTop = messages.scrollHeight;
-        dc.send(input.value);
+        dc.send(JSON.stringify({ nick: nickname, text: input.value }));
         input.value = "";
     } else {
         console.warn("数据通道尚未就绪，请稍等...");
@@ -206,8 +281,9 @@ async function openVideo () {
 
         const videoStream = await navigator.mediaDevices.getUserMedia({
             video: {
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
+                width: { ideal: 640, max: 640 },
+                height: { ideal: 360, max: 360 },
+                frameRate: { ideal: 15, max: 15 },
                 facingMode: "user"
             },
             audio: false // 不重复获取音频
@@ -221,6 +297,7 @@ async function openVideo () {
         if (localVideo) {
             localVideo.srcObject = localStream;
         }
+        forceVP8Codec();
 
         videoEnabled = true;
         statusDiv.textContent = "状态：视频已开启";
@@ -229,7 +306,8 @@ async function openVideo () {
 
         if (pc && ws && ws.readyState === WebSocket.OPEN) {
             const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
+            const modifiedSdp = limitVideoBandwidthInSdp(offer.sdp, VideoBitrate);
+            await pc.setLocalDescription({ type: offer.type, sdp: modifiedSdp });
             ws.send(JSON.stringify(offer));
             console.log("视频轨道已添加，重新发送 Offer");
         }
@@ -241,4 +319,91 @@ async function openVideo () {
         document.getElementById('leaveBtn').disabled = true;
         pttBtn.disabled = true;
     }
+}
+
+async function updateStats () {
+    if (!pc || pc.connectionState !== 'connected') {
+        return;
+    }
+
+    try {
+        const stats = await pc.getStats();
+        let bytesSent = 0;
+        let bytesReceived = 0;
+
+        stats.forEach(report => {
+            if (report.type === 'outbound-rtp') {
+                bytesSent += report.bytesSent || 0;
+            }
+            if (report.type === 'inbound-rtp') {
+                bytesReceived += report.bytesReceived || 0;
+            }
+        });
+
+        // 转换为 MB 显示
+        const upMB = (bytesSent / 1024 / 1024).toFixed(2);
+        const downMB = (bytesReceived / 1024 / 1024).toFixed(2);
+        const totalMB = ((bytesSent + bytesReceived) / 1024 / 1024).toFixed(2);
+
+        document.getElementById('statsUp').textContent = `${upMB} MB`;
+        document.getElementById('statsDown').textContent = `${downMB} MB`;
+        document.getElementById('statsTotal').textContent = `${totalMB} MB`;
+    } catch (err) {
+        console.error('获取统计失败:', err);
+    }
+}
+
+function limitVideoBandwidthInSdp (sdp, kbps) {
+    return sdp.replace(
+        /^(m=video.*$)/m,
+        `$1\r\nb=AS:${kbps}`
+    );
+}
+
+function enforceBitrate () {
+    pc.getSenders().forEach(sender => {
+        if (!sender.track) return;
+
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+        }
+
+        if (sender.track.kind === 'video') {
+            params.encodings[0].maxBitrate = VideoBitrate * 1000; // 500kbps
+            params.encodings[0].scaleResolutionDownBy = 1;
+        } else if (sender.track.kind === 'audio') {
+            params.encodings[0].maxBitrate = 32000; // 音频 32kbps 足够
+        }
+
+        sender.setParameters(params).catch(e => console.warn('setParameters 失败:', e));
+    });
+}
+
+function forceVP8Codec () {
+    if (!pc) return;
+
+    const transceivers = pc.getTransceivers();
+    transceivers.forEach(transceiver => {
+        if (transceiver.sender.track?.kind === 'video' ||
+            transceiver.direction === 'recvonly') {
+
+            const capabilities = RTCRtpSender.getCapabilities('video');
+            if (!capabilities) return;
+
+            // 把 VP8 排到最前面
+            const vp8 = capabilities.codecs.filter(
+                c => c.mimeType === 'video/VP8'
+            );
+            const others = capabilities.codecs.filter(
+                c => c.mimeType !== 'video/VP8'
+            );
+
+            try {
+                transceiver.setCodecPreferences([...vp8, ...others]);
+            } catch (e) {
+                console.warn('setCodecPreferences 不支持:', e);
+            }
+        }
+    });
 }

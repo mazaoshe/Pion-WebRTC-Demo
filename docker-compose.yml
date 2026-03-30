@@ -15,7 +15,7 @@ services:
       - traefik-net
     environment:
       - PORT=8080
-      - STUN_URLS=stun:stun.l.google.com:19302
+      - STUN_URLS=stun:stun-test.meilebei.com:3478
       - UDP_MIN=50000
       - UDP_MAX=50020
     ports:
