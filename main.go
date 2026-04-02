@@ -275,6 +275,16 @@ func main() {
 				mutex.Lock()
 				dataChannels[localID] = d
 				mutex.Unlock()
+
+				// ✅ 新增：广播"有人进入"通知
+				joinMsg := fmt.Sprintf(`{"type":"system","event":"join","from":"%s","channel":"%s"}`, localID, channel)
+				mutex.Lock()
+				for id, dc := range dataChannels {
+					if id != localID && sameChannel(id, localID) {
+						dc.SendText(joinMsg)
+					}
+				}
+				mutex.Unlock()
 			})
 
 			d.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -290,7 +300,14 @@ func main() {
 
 			d.OnClose(func() {
 				log.Printf("数据通道 '%s' 已关闭\n", localID)
+				// ✅ 新增：广播"有人离开"通知（先广播再删除）
+				leaveMsg := fmt.Sprintf(`{"type":"system","event":"leave","from":"%s","channel":"%s"}`, localID, channel)
 				mutex.Lock()
+				for id, dc := range dataChannels {
+					if id != localID && sameChannel(id, localID) {
+						dc.SendText(leaveMsg)
+					}
+				}
 				delete(dataChannels, localID)
 				mutex.Unlock()
 			})

@@ -116,13 +116,30 @@ async function startApp () {
 
         // 5. 依然保留文本聊天通道
         dc = pc.createDataChannel("chat");
-        dc.onopen = () => console.log("数据通道已成功建立！");
+        dc.onopen = () => {
+            console.log("数据通道已成功建立！");
+
+            // ✅ 发送自我介绍，让其他人知道你的昵称
+            dc.send(JSON.stringify({
+                type: 'system',
+                event: 'hello',
+                nick: nickname
+            }));
+        };
         dc.onmessage = event => {
             const data = JSON.parse(event.data);
-            let message = document.createElement('div');
-            message.textContent = `${data.nick}: ${data.text}`;
-            messages.appendChild(message);
-            messages.scrollTop = messages.scrollHeight;
+            if (data.type === 'system') {
+                // 系统通知
+                const nick = data.from; // 服务端暂时用 peer-id，下面会改成昵称
+                if (data.event === 'join') {
+                    showSystemMessage(`👋 ${nick} 加入了频道`);
+                } else if (data.event === 'leave') {
+                    showSystemMessage(`🚪 ${nick} 离开了频道`);
+                }
+            } else {
+                // 普通聊天消息
+                appendMessage(`${data.nick}: ${data.text}`);
+            }
         };
 
         // 6. ICE Candidate 处理
@@ -406,4 +423,19 @@ function forceVP8Codec () {
             }
         }
     });
+}
+
+function appendMessage (text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+}
+
+function showSystemMessage (text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    div.style.cssText = 'color:#888; font-style:italic; font-size:12px; margin:4px 0;';
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
 }
