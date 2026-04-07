@@ -132,6 +132,14 @@ async function startApp () {
                 event: 'hello',
                 nick: nickname
             }));
+
+            pttBtn.disabled = false;
+            pttBtn.onpointerdown = () => { setMicEnabled(true); sendControl("ptt", "down"); };
+            pttBtn.onpointerup = () => { setMicEnabled(false); sendControl("ptt", "up"); };
+            pttBtn.onpointercancel = () => { setMicEnabled(false); sendControl("ptt", "up"); };
+            pttBtn.onmouseleave = () => { setMicEnabled(false); sendControl("ptt", "up"); };
+
+            sendControl("ptt", "up");
         };
         dc.onmessage = event => {
             let data = null;
@@ -207,12 +215,8 @@ async function startApp () {
             }
         };
 
-        // 8. 绑定按住说话按钮
-        pttBtn.disabled = false;
-        pttBtn.onpointerdown = () => { setMicEnabled(true); sendControl("ptt", "down"); };
-        pttBtn.onpointerup = () => { setMicEnabled(false); sendControl("ptt", "up"); };
-        pttBtn.onpointercancel = () => { setMicEnabled(false); sendControl("ptt", "up"); };
-        pttBtn.onmouseleave = () => { setMicEnabled(false); sendControl("ptt", "up"); };
+        // 8. 按住说话按钮在 DataChannel 打开后启用
+        pttBtn.disabled = true;
 
     } catch (err) {
         console.error("无法获取麦克风权限或初始化失败:", err);
