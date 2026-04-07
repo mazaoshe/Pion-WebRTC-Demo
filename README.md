@@ -198,6 +198,8 @@ USE_TLS=true TLS_CERT_FILE=cert.pem TLS_KEY_FILE=key.pem ./server
 
 ```bash
 systemctl restart pion-webrtc.service
+//查看运行日志
+journalctl -u pion-webrtc.service -f
 ```
 
 ## 常见问题
@@ -224,5 +226,3 @@ systemctl restart pion-webrtc.service
 
 本项目基于 [MIT 许可证](LICENSE) 开源。
 
-需要搭配：
-yum install -y opus-devel
