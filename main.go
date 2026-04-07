@@ -54,6 +54,9 @@ var (
 
 	// 每个 peer 的昵称（来自 DataChannel 的 hello）
 	peerNicknames = make(map[string]string)
+
+	// 每个 peer 上一次识别的文本（用于“增量输出”去重/截断）
+	peerLastTranscribes = make(map[string]string)
 )
 
 func main() {
@@ -377,6 +380,7 @@ func main() {
 				delete(videoSenders, localID)
 				delete(peerChannels, localID)
 				delete(peerNicknames, localID)
+				delete(peerLastTranscribes, localID)
 				mutex.Unlock()
 			}
 		})

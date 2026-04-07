@@ -348,7 +348,7 @@ async function openVideo () {
             const offer = await pc.createOffer();
             const modifiedSdp = limitVideoBandwidthInSdp(offer.sdp, VideoBitrate);
             await pc.setLocalDescription({ type: offer.type, sdp: modifiedSdp });
-            ws.send(JSON.stringify(offer));
+            ws.send(JSON.stringify({ type: offer.type, sdp: modifiedSdp }));
             console.log("视频轨道已添加，重新发送 Offer");
         }
 
