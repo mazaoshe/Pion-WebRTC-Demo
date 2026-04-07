@@ -73,6 +73,12 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o server
 
 打开浏览器，访问 [http://localhost:8080](http://localhost:8080)。
 
+### 6. 测试
+
+```bash
+systemctl restart pion-webrtc.service
+```
+
 ## 常见问题
 
 ### 视频卡顿或连接慢
@@ -93,3 +99,8 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o server
 ## 许可证
 
 本项目基于 [MIT 许可证](LICENSE) 开源。
+
+
+
+需要搭配：
+yum install -y opus-devel

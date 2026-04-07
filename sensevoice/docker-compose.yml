@@ -1,0 +1,21 @@
+services:
+  sensevoice:
+    build: .
+    container_name: sensevoice
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./model_cache:/root/.cache
+      - ./sensevoice_server.py:/app/sensevoice_server.py
+    environment:
+      - MODELSCOPE_CACHE=/root/.cache/modelscope
+      # 限制 torch 只用 2 个线程，不然会把 CPU 打满
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1500M   # 给系统留 500M 喘气
+        reservations:
+          memory: 800M

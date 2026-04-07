@@ -206,6 +206,8 @@ func main() {
 			log.Printf("收到来自 '%s' 的音频轨道: %s \n", localID, track.Codec().MimeType)
 
 			if track.Kind() == webrtc.RTPCodecTypeAudio {
+				// ✅ 新增：启动 SenseVoice 识别流水线
+				go startSenseVoicePipeline(localID, track)
 
 				// 循环读取 RTP 音频包
 				for {
