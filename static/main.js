@@ -27,7 +27,7 @@ function setMicEnabled (enabled) {
     localStream.getAudioTracks().forEach(track => {
         track.enabled = enabled;
     });
-    statusDiv.textContent = enabled ? "状态: 正在说话" : "状态: 已连接 (静音)";
+    statusDiv.textContent = enabled ? "状态: 麦克风已开启" : "状态: 已连接 (静音)";
 }
 
 // 统一的入口函数
@@ -127,19 +127,30 @@ async function startApp () {
             }));
         };
         dc.onmessage = event => {
-            const data = JSON.parse(event.data);
+            let data = null;
+            try {
+                data = JSON.parse(event.data);
+            } catch (e) {
+                appendMessage(String(event.data));
+                return;
+            }
+
             if (data.type === 'system') {
-                // 系统通知
-                const nick = data.from; // 服务端暂时用 peer-id，下面会改成昵称
+                const nick = data.from;
                 if (data.event === 'join') {
                     showSystemMessage(`👋 ${nick} 加入了频道`);
                 } else if (data.event === 'leave') {
                     showSystemMessage(`🚪 ${nick} 离开了频道`);
                 }
-            } else {
-                // 普通聊天消息
-                appendMessage(`${data.nick}: ${data.text}`);
+                return;
             }
+
+            if (data.type === 'transcribe') {
+                appendMessage(`${data.from}: ${data.text}`);
+                return;
+            }
+
+            appendMessage(`${data.nick || data.from || '未知'}: ${data.text || ''}`);
         };
 
         // 6. ICE Candidate 处理
@@ -186,10 +197,10 @@ async function startApp () {
 
         // 8. 绑定按住说话按钮
         pttBtn.disabled = false;
-        pttBtn.addEventListener('pointerdown', () => setMicEnabled(true));
-        pttBtn.addEventListener('pointerup', () => setMicEnabled(false));
-        pttBtn.addEventListener('pointercancel', () => setMicEnabled(false));
-        pttBtn.addEventListener('mouseleave', () => setMicEnabled(false));
+        pttBtn.onpointerdown = () => { if (!videoEnabled) setMicEnabled(true); };
+        pttBtn.onpointerup = () => { if (!videoEnabled) setMicEnabled(false); };
+        pttBtn.onpointercancel = () => { if (!videoEnabled) setMicEnabled(false); };
+        pttBtn.onmouseleave = () => { if (!videoEnabled) setMicEnabled(false); };
 
     } catch (err) {
         console.error("无法获取麦克风权限或初始化失败:", err);
@@ -212,6 +223,10 @@ function leaveApp () {
 
     setMicEnabled(false);
     pttBtn.disabled = true;
+    pttBtn.onpointerdown = null;
+    pttBtn.onpointerup = null;
+    pttBtn.onpointercancel = null;
+    pttBtn.onmouseleave = null;
 
     // 1. 停止本地麦克风流
     if (localStream) {
@@ -320,6 +335,9 @@ async function openVideo () {
         statusDiv.textContent = "状态：视频已开启";
         document.getElementById('videoBtn').disabled = true;
         document.getElementById('videoBtn').textContent = "视频已开启";
+
+        setMicEnabled(true);
+        pttBtn.disabled = true;
 
         if (pc && ws && ws.readyState === WebSocket.OPEN) {
             const offer = await pc.createOffer();

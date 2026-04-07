@@ -206,8 +206,16 @@ func main() {
 			log.Printf("收到来自 '%s' 的音频轨道: %s \n", localID, track.Codec().MimeType)
 
 			if track.Kind() == webrtc.RTPCodecTypeAudio {
-				// ✅ 新增：启动 SenseVoice 识别流水线
-				go startSenseVoicePipeline(localID, track)
+				var pipeline *SenseVoicePipeline
+				if strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypeOpus) {
+					p, err := newSenseVoicePipeline(localID)
+					if err != nil {
+						log.Printf("创建 SenseVoice 流水线失败: %v", err)
+					} else {
+						pipeline = p
+						defer pipeline.Close()
+					}
+				}
 
 				// 循环读取 RTP 音频包
 				for {
@@ -215,6 +223,10 @@ func main() {
 					if readErr != nil {
 						log.Printf("读取 RTP 包失败或连接断开: %v", readErr)
 						return
+					}
+
+					if pipeline != nil {
+						pipeline.PushOpus(rtpPacket.Payload)
 					}
 
 					// 将收到的音频包广播给其他所有客户端的下行轨道
