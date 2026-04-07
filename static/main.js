@@ -27,7 +27,14 @@ function setMicEnabled (enabled) {
     localStream.getAudioTracks().forEach(track => {
         track.enabled = enabled;
     });
-    statusDiv.textContent = enabled ? "状态: 麦克风已开启" : "状态: 已连接 (静音)";
+    statusDiv.textContent = enabled ? "状态: 正在说话" : "状态: 已连接 (静音)";
+}
+
+function sendControl (event, state) {
+    if (!dc || dc.readyState !== "open") {
+        return;
+    }
+    dc.send(JSON.stringify({ type: "control", event, state }));
 }
 
 // 统一的入口函数
@@ -202,10 +209,10 @@ async function startApp () {
 
         // 8. 绑定按住说话按钮
         pttBtn.disabled = false;
-        pttBtn.onpointerdown = () => { if (!videoEnabled) setMicEnabled(true); };
-        pttBtn.onpointerup = () => { if (!videoEnabled) setMicEnabled(false); };
-        pttBtn.onpointercancel = () => { if (!videoEnabled) setMicEnabled(false); };
-        pttBtn.onmouseleave = () => { if (!videoEnabled) setMicEnabled(false); };
+        pttBtn.onpointerdown = () => { setMicEnabled(true); sendControl("ptt", "down"); };
+        pttBtn.onpointerup = () => { setMicEnabled(false); sendControl("ptt", "up"); };
+        pttBtn.onpointercancel = () => { setMicEnabled(false); sendControl("ptt", "up"); };
+        pttBtn.onmouseleave = () => { setMicEnabled(false); sendControl("ptt", "up"); };
 
     } catch (err) {
         console.error("无法获取麦克风权限或初始化失败:", err);
@@ -340,9 +347,6 @@ async function openVideo () {
         statusDiv.textContent = "状态：视频已开启";
         document.getElementById('videoBtn').disabled = true;
         document.getElementById('videoBtn').textContent = "视频已开启";
-
-        setMicEnabled(true);
-        pttBtn.disabled = true;
 
         if (pc && ws && ws.readyState === WebSocket.OPEN) {
             const offer = await pc.createOffer();

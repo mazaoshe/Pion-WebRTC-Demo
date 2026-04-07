@@ -55,8 +55,8 @@ var (
 	// 每个 peer 的昵称（来自 DataChannel 的 hello）
 	peerNicknames = make(map[string]string)
 
-	// 每个 peer 上一次识别的文本（用于“增量输出”去重/截断）
-	peerLastTranscribes = make(map[string]string)
+	peerPipelines = make(map[string]*SenseVoicePipeline)
+	peerPTTActive = make(map[string]bool)
 )
 
 func main() {
@@ -219,7 +219,17 @@ func main() {
 						log.Printf("创建 SenseVoice 流水线失败: %v", err)
 					} else {
 						pipeline = p
+						mutex.Lock()
+						peerPipelines[localID] = pipeline
+						active := peerPTTActive[localID]
+						mutex.Unlock()
+						pipeline.SetActive(active)
 						defer pipeline.Close()
+						defer func() {
+							mutex.Lock()
+							delete(peerPipelines, localID)
+							mutex.Unlock()
+						}()
 					}
 				}
 
@@ -312,6 +322,7 @@ func main() {
 					Type  string `json:"type"`
 					Event string `json:"event"`
 					Nick  string `json:"nick"`
+					State string `json:"state"`
 				}
 				if err := json.Unmarshal(msg.Data, &parsed); err == nil {
 					if parsed.Type == "system" && parsed.Event == "hello" && strings.TrimSpace(parsed.Nick) != "" {
@@ -340,6 +351,19 @@ func main() {
 								}
 							}
 							mutex.Unlock()
+						}
+						return
+					}
+
+					if parsed.Type == "control" && parsed.Event == "ptt" {
+						state := strings.ToLower(strings.TrimSpace(parsed.State))
+						active := state == "down" || state == "start" || state == "1" || state == "true"
+						mutex.Lock()
+						peerPTTActive[localID] = active
+						pipeline := peerPipelines[localID]
+						mutex.Unlock()
+						if pipeline != nil {
+							pipeline.SetActive(active)
 						}
 						return
 					}
@@ -380,7 +404,8 @@ func main() {
 				delete(videoSenders, localID)
 				delete(peerChannels, localID)
 				delete(peerNicknames, localID)
-				delete(peerLastTranscribes, localID)
+				delete(peerPipelines, localID)
+				delete(peerPTTActive, localID)
 				mutex.Unlock()
 			}
 		})

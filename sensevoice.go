@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/hraban/opus.v2"
 )
@@ -31,13 +32,12 @@ type SenseVoicePipeline struct {
 	localID string
 	dec     *opus.Decoder
 
-	pcm48k  []int16
-	preRoll []int16
-	segment []int16
+	mu         sync.Mutex
+	active     bool
+	flushTimer *time.Timer
 
-	silenceSamples int
-	noiseMeanSq    int64
-	sinceFlush     int
+	pcm48k  []int16
+	segment []int16
 
 	segments chan []int16
 	wg       sync.WaitGroup
@@ -55,7 +55,6 @@ func newSenseVoicePipeline(localID string) (*SenseVoicePipeline, error) {
 		pcm48k:   make([]int16, maxFrameSize),
 		segments: make(chan []int16, 8),
 	}
-	p.noiseMeanSq = baseEnergyThreshold() / 2
 
 	p.wg.Add(1)
 	go func() {
@@ -69,21 +68,35 @@ func newSenseVoicePipeline(localID string) (*SenseVoicePipeline, error) {
 }
 
 func (p *SenseVoicePipeline) Close() {
-	if len(p.segment) >= minSegmentSamples() {
-		seg := make([]int16, len(p.segment))
-		copy(seg, p.segment)
-		select {
-		case p.segments <- seg:
-		default:
-		}
-	}
+	p.FlushNow()
 	close(p.segments)
 	p.wg.Wait()
 }
 
+func (p *SenseVoicePipeline) SetActive(active bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if active {
+		p.active = true
+		p.segment = p.segment[:0]
+		if p.flushTimer != nil {
+			p.flushTimer.Stop()
+			p.flushTimer = nil
+		}
+		return
+	}
+
+	p.active = false
+	if p.flushTimer != nil {
+		p.flushTimer.Stop()
+		p.flushTimer = nil
+	}
+	p.flushTimer = time.AfterFunc(250*time.Millisecond, p.FlushNow)
+}
+
 func (p *SenseVoicePipeline) PushOpus(payload []byte) {
 	if len(payload) == 0 {
-		p.pushSilence(targetRate / 50)
 		return
 	}
 
@@ -93,96 +106,14 @@ func (p *SenseVoicePipeline) PushOpus(payload []byte) {
 	}
 
 	pcm16k := downsample48kTo16k(p.pcm48k[:n])
+	if len(pcm16k) == 0 {
+		return
+	}
 
-	p.updatePreRoll(pcm16k)
-	meanSq := meanSquare(pcm16k)
-	if p.isSpeechMeanSq(meanSq) {
-		if len(p.segment) == 0 && len(p.preRoll) > 0 {
-			p.segment = append(p.segment, p.preRoll...)
-		}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active {
 		p.segment = append(p.segment, pcm16k...)
-		p.silenceSamples = 0
-		p.sinceFlush += len(pcm16k)
-		if len(p.segment) >= maxSegmentSamples() || p.sinceFlush >= flushIntervalSamples() {
-			p.flushKeepTail(flushCarrySamples())
-		}
-		return
-	}
-
-	p.updateNoise(meanSq)
-	p.sinceFlush = 0
-	p.pushSilence(len(pcm16k))
-}
-
-func (p *SenseVoicePipeline) pushSilence(nSamples int) {
-	if len(p.segment) == 0 {
-		return
-	}
-
-	p.silenceSamples += nSamples
-	if len(p.segment) >= minSegmentSamples() && p.silenceSamples >= endSilenceSamples() {
-		p.flushAll()
-	}
-}
-
-func (p *SenseVoicePipeline) updatePreRoll(pcm16k []int16) {
-	const preRollMax = 2400
-	if len(pcm16k) >= preRollMax {
-		p.preRoll = append(p.preRoll[:0], pcm16k[len(pcm16k)-preRollMax:]...)
-		return
-	}
-	need := preRollMax - len(p.preRoll)
-	if need > 0 {
-		if len(pcm16k) >= need {
-			p.preRoll = append(p.preRoll, pcm16k[len(pcm16k)-need:]...)
-			return
-		}
-		p.preRoll = append(p.preRoll, pcm16k...)
-		return
-	}
-	p.preRoll = append(p.preRoll, pcm16k...)
-	if len(p.preRoll) > preRollMax {
-		p.preRoll = p.preRoll[len(p.preRoll)-preRollMax:]
-	}
-}
-
-func (p *SenseVoicePipeline) flushAll() {
-	if len(p.segment) == 0 {
-		return
-	}
-	seg := make([]int16, len(p.segment))
-	copy(seg, p.segment)
-	p.segment = p.segment[:0]
-	p.silenceSamples = 0
-	p.sinceFlush = 0
-
-	select {
-	case p.segments <- seg:
-	default:
-	}
-}
-
-func (p *SenseVoicePipeline) flushKeepTail(tail int) {
-	if len(p.segment) < minSegmentSamples() {
-		return
-	}
-
-	seg := make([]int16, len(p.segment))
-	copy(seg, p.segment)
-
-	if tail > 0 && len(p.segment) > tail {
-		copy(p.segment[:tail], p.segment[len(p.segment)-tail:])
-		p.segment = p.segment[:tail]
-	} else {
-		p.segment = p.segment[:0]
-	}
-
-	p.silenceSamples = 0
-	p.sinceFlush = 0
-
-	select {
-	case p.segments <- seg:
-	default:
 	}
 }
 
@@ -198,63 +129,32 @@ func downsample48kTo16k(pcm48k []int16) []int16 {
 	return out
 }
 
-func meanSquare(pcm []int16) int64 {
-	if len(pcm) == 0 {
-		return 0
-	}
-	var sum int64
-	for _, s := range pcm {
-		v := int64(s)
-		sum += v * v
-	}
-	return sum / int64(len(pcm))
-}
-
-func baseEnergyThreshold() int64 {
-	const rms = 120
-	return int64(rms) * int64(rms)
-}
-
 func minSegmentSamples() int {
-	return targetRate / 4
+	return targetRate * 3 / 20
 }
 
-func endSilenceSamples() int {
-	return targetRate * 3 / 10
-}
+func (p *SenseVoicePipeline) FlushNow() {
+	var seg []int16
 
-func maxSegmentSamples() int {
-	return targetRate * 2
-}
-
-func flushIntervalSamples() int {
-	return targetRate / 2
-}
-
-func flushCarrySamples() int {
-	return targetRate / 5
-}
-
-func (p *SenseVoicePipeline) isSpeechMeanSq(meanSq int64) bool {
-	thr := baseEnergyThreshold()
-	if p.noiseMeanSq > 0 {
-		adaptive := p.noiseMeanSq * 6
-		if adaptive > thr {
-			thr = adaptive
-		}
+	p.mu.Lock()
+	if p.flushTimer != nil {
+		p.flushTimer.Stop()
+		p.flushTimer = nil
 	}
-	return meanSq >= thr
-}
-
-func (p *SenseVoicePipeline) updateNoise(meanSq int64) {
-	if meanSq <= 0 {
+	if p.active || len(p.segment) < minSegmentSamples() {
+		p.segment = p.segment[:0]
+		p.mu.Unlock()
 		return
 	}
-	if p.noiseMeanSq <= 0 {
-		p.noiseMeanSq = meanSq
-		return
+	seg = make([]int16, len(p.segment))
+	copy(seg, p.segment)
+	p.segment = p.segment[:0]
+	p.mu.Unlock()
+
+	select {
+	case p.segments <- seg:
+	default:
 	}
-	p.noiseMeanSq = (p.noiseMeanSq*19 + meanSq) / 20
 }
 
 // 发送到 SenseVoice 并通过 DataChannel 广播结果
@@ -302,18 +202,7 @@ func sendAndBroadcast(localID string, pcm []int16) {
 		nick = localID
 	}
 
-	delta := ""
-	mutex.Lock()
-	prev := peerLastTranscribes[localID]
-	delta = deltaText(prev, text)
-	peerLastTranscribes[localID] = text
-	mutex.Unlock()
-
-	if strings.TrimSpace(delta) == "" {
-		return
-	}
-
-	fmt.Printf("[SenseVoice] %s 识别结果: %s\n", nick, delta)
+	fmt.Printf("[SenseVoice] %s 识别结果: %s\n", nick, text)
 
 	// 构造消息，通过 DataChannel 发给同频道所有人
 	msgBytes, err := json.Marshal(struct {
@@ -325,7 +214,7 @@ func sendAndBroadcast(localID string, pcm []int16) {
 		Type: "transcribe",
 		From: localID,
 		Nick: nick,
-		Text: delta,
+		Text: text,
 	})
 	if err != nil {
 		return
@@ -351,27 +240,6 @@ func cleanSenseVoiceText(s string) string {
 	s = strings.ReplaceAll(s, "\u0000", "")
 	s = strings.Join(strings.Fields(s), " ")
 	return strings.TrimSpace(s)
-}
-
-func deltaText(prev, curr string) string {
-	prev = strings.TrimSpace(prev)
-	curr = strings.TrimSpace(curr)
-	if curr == "" {
-		return ""
-	}
-	if prev == "" {
-		return curr
-	}
-	if strings.HasPrefix(curr, prev) {
-		return strings.TrimSpace(curr[len(prev):])
-	}
-	if strings.Contains(curr, prev) {
-		i := strings.LastIndex(curr, prev)
-		if i >= 0 {
-			return strings.TrimSpace(curr[i+len(prev):])
-		}
-	}
-	return curr
 }
 
 // PCM int16 → WAV bytes
