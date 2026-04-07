@@ -233,16 +233,26 @@ func sendAndBroadcast(localID string, pcm []int16) {
 		return
 	}
 
-	fmt.Printf("[SenseVoice] %s 识别结果: %s\n", localID, text)
+	nick := ""
+	mutex.Lock()
+	nick = peerNicknames[localID]
+	mutex.Unlock()
+	if strings.TrimSpace(nick) == "" {
+		nick = localID
+	}
+
+	fmt.Printf("[SenseVoice] %s 识别结果: %s\n", nick, text)
 
 	// 构造消息，通过 DataChannel 发给同频道所有人
 	msgBytes, err := json.Marshal(struct {
 		Type string `json:"type"`
 		From string `json:"from"`
+		Nick string `json:"nick"`
 		Text string `json:"text"`
 	}{
 		Type: "transcribe",
 		From: localID,
+		Nick: nick,
 		Text: text,
 	})
 	if err != nil {

@@ -137,6 +137,11 @@ async function startApp () {
 
             if (data.type === 'system') {
                 const nick = data.from;
+                if (data.event === 'hello' && data.from && data.nick) {
+                    window.__peerNicknames = window.__peerNicknames || {};
+                    window.__peerNicknames[data.from] = data.nick;
+                    return;
+                }
                 if (data.event === 'join') {
                     showSystemMessage(`👋 ${nick} 加入了频道`);
                 } else if (data.event === 'leave') {
@@ -146,7 +151,7 @@ async function startApp () {
             }
 
             if (data.type === 'transcribe') {
-                appendMessage(`${data.from}: ${data.text}`);
+                appendMessage(`${data.nick || (window.__peerNicknames && window.__peerNicknames[data.from]) || data.from || '未知'}: ${data.text}`);
                 return;
             }
 

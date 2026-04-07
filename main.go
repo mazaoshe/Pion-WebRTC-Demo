@@ -51,6 +51,9 @@ var (
 
 	// 每个 peer 属于哪个频道
 	peerChannels = make(map[string]string)
+
+	// 每个 peer 的昵称（来自 DataChannel 的 hello）
+	peerNicknames = make(map[string]string)
 )
 
 func main() {
@@ -302,14 +305,50 @@ func main() {
 			})
 
 			d.OnMessage(func(msg webrtc.DataChannelMessage) {
-				mutex.Lock()
-				defer mutex.Unlock()
-				for id, dc := range dataChannels {
-					if id != localID && sameChannel(id, localID) {
-						if err := dc.SendText(string(msg.Data)); err != nil {
+				var parsed struct {
+					Type  string `json:"type"`
+					Event string `json:"event"`
+					Nick  string `json:"nick"`
+				}
+				if err := json.Unmarshal(msg.Data, &parsed); err == nil {
+					if parsed.Type == "system" && parsed.Event == "hello" && strings.TrimSpace(parsed.Nick) != "" {
+						nick := strings.TrimSpace(parsed.Nick)
+
+						mutex.Lock()
+						peerNicknames[localID] = nick
+						mutex.Unlock()
+
+						payload, err := json.Marshal(struct {
+							Type  string `json:"type"`
+							Event string `json:"event"`
+							From  string `json:"from"`
+							Nick  string `json:"nick"`
+						}{
+							Type:  "system",
+							Event: "hello",
+							From:  localID,
+							Nick:  nick,
+						})
+						if err == nil {
+							mutex.Lock()
+							for id, dc := range dataChannels {
+								if id != localID && sameChannel(id, localID) {
+									dc.SendText(string(payload))
+								}
+							}
+							mutex.Unlock()
 						}
+						return
 					}
 				}
+
+				mutex.Lock()
+				for id, dc := range dataChannels {
+					if id != localID && sameChannel(id, localID) {
+						dc.SendText(string(msg.Data))
+					}
+				}
+				mutex.Unlock()
 			})
 
 			d.OnClose(func() {
@@ -337,6 +376,7 @@ func main() {
 				delete(dataChannels, localID)
 				delete(videoSenders, localID)
 				delete(peerChannels, localID)
+				delete(peerNicknames, localID)
 				mutex.Unlock()
 			}
 		})
