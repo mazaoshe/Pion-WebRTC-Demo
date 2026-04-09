@@ -19,6 +19,10 @@ let totalBytesSent = 0;
 let totalBytesReceived = 0;
 let nickname = '用户';
 let channel = 'test';
+let autoReconnectEnabled = false;
+let reconnecting = false;
+let reconnectTimer = null;
+let disconnectedTimer = null;
 
 function setMicEnabled (enabled) {
     if (!localStream) {
@@ -37,8 +41,33 @@ function sendControl (event, state) {
     dc.send(JSON.stringify({ type: "control", event, state }));
 }
 
+function scheduleReconnect (reason) {
+    if (!autoReconnectEnabled || reconnecting) {
+        return;
+    }
+    reconnecting = true;
+    showSystemMessage(`连接异常(${reason})，正在重连...`);
+    leaveAppInternal();
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        startApp().finally(() => {
+            reconnecting = false;
+        });
+    }, 800);
+}
+
 // 统一的入口函数
 async function startApp () {
+    autoReconnectEnabled = true;
+    reconnecting = false;
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    if (disconnectedTimer) {
+        clearTimeout(disconnectedTimer);
+        disconnectedTimer = null;
+    }
 
     var channelInput = document.getElementById('channelInput');
     var nicknameInput = document.getElementById('nameInput');
@@ -141,6 +170,9 @@ async function startApp () {
 
             sendControl("ptt", "up");
         };
+        dc.onclose = () => {
+            scheduleReconnect("datachannel");
+        };
         dc.onmessage = event => {
             let data = null;
             try {
@@ -205,6 +237,9 @@ async function startApp () {
                 }));
             });
         };
+        ws.onclose = function () {
+            scheduleReconnect("websocket");
+        };
 
         ws.onmessage = function (event) {
             let msg = JSON.parse(event.data);
@@ -229,12 +264,46 @@ async function startApp () {
     pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'connected') {
             enforceBitrate();
+            if (disconnectedTimer) {
+                clearTimeout(disconnectedTimer);
+                disconnectedTimer = null;
+            }
+            return;
+        }
+        if (pc.connectionState === 'failed') {
+            scheduleReconnect("webrtc-failed");
+            return;
+        }
+        if (pc.connectionState === 'disconnected') {
+            if (disconnectedTimer) {
+                return;
+            }
+            disconnectedTimer = setTimeout(() => {
+                disconnectedTimer = null;
+                if (pc && pc.connectionState === 'disconnected') {
+                    scheduleReconnect("webrtc-disconnected");
+                }
+            }, 2000);
         }
     };
 }
 
 // 离开频道的函数
 function leaveApp () {
+    autoReconnectEnabled = false;
+    reconnecting = false;
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    if (disconnectedTimer) {
+        clearTimeout(disconnectedTimer);
+        disconnectedTimer = null;
+    }
+    leaveAppInternal();
+}
+
+function leaveAppInternal () {
     console.log("正在离开频道...");
 
     setMicEnabled(false);

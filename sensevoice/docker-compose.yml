@@ -12,10 +12,17 @@ services:
       # 限制 torch 只用 2 个线程，不然会把 CPU 打满
       - OMP_NUM_THREADS=2
       - MKL_NUM_THREADS=2
+      - TORCH_NUM_THREADS=2
+      - TORCH_NUM_INTEROP_THREADS=1
+      - BATCH_SIZE_S=15
+      - VAD_MAX_SINGLE_SEGMENT_TIME=15000
+      - LOCK_MODE=wait
+      - LOCK_TIMEOUT_S=0
+      - RESAMPLE_TO_16K=0
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 1500M   # 给系统留 500M 喘气
+          memory: 5G
         reservations:
-          memory: 800M
+          memory: 1500M

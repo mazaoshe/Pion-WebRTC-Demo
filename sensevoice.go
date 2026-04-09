@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	senseVoiceURL = "http://localhost:8765/transcribe"
+	senseVoiceURL = "http://175.27.225.87:8765/transcribe"
 	sampleRate    = 48000
 	channels      = 1
 	targetRate    = 16000
